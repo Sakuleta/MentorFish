@@ -1,0 +1,30 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Large files (>50 MB) — excluded from git
+bin/stockfish/stockfish-windows-x86-64-avx2.exe
+knowledge/books/10.My Great Predecessors  by Garry Kasparov_All Part(1-5).pdf
+knowledge/books/Flores Rios - Chess Structures - A Grandmaster Guide.pdf
+knowledge/chunks_all.json

@@ -1,0 +1,65 @@
+[package]
+name = "mentorfish"
+version = "0.1.0"
+description = "Personal GM Training System — Adaptive Chess Intelligence Platform"
+authors = [""]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+# ─── Tauri Core ───
+tauri = { version = "2.11.2", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+
+# ─── Async Runtime ───
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+tokio-stream = "0.1"
+futures = "0.3"
+
+# ─── HTTP Client (Ollama API) ───
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# ─── Chess Engine ───
+shakmaty = "0.28"
+num_cpus = "1"
+
+# ─── Database ───
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono"] }
+redis = { version = "0.27", features = ["tokio-comp"] }
+
+# ─── Utilities ───
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+thiserror = "2"
+regex = "1"
+dirs-next = "2"
+rand = "0.8"
+
+# ─── Embedding / ML ───
+# Note: nomic-embed-text-v1.5 runs via Ollama API, not directly linked.
+# The embedding client is implemented in inference/ollama.rs
+
+[dev-dependencies]
+# Testing utilities
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 2
+lto = true
+codegen-units = 1
+strip = true

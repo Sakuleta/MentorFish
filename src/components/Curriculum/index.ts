@@ -1,0 +1,1 @@
+export { CurriculumView } from "./CurriculumView";

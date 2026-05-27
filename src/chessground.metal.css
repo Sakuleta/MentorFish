@@ -1,0 +1,32 @@
+/* Lichess Metal Board Theme */
+.cg-wrap {
+    background-image: url("./metal.jpg");
+    background-size: cover;
+}
+.cg-wrap coords {
+    color: #aaa;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+.cg-wrap square.last-move {
+    background-color: rgba(155, 199, 0, 0.41);
+}
+.cg-wrap square.check {
+    background: radial-gradient(
+        ellipse at center,
+        rgba(255, 0, 0, 1) 0%,
+        rgba(231, 0, 0, 1) 25%,
+        rgba(169, 0, 0, 0) 89%
+    );
+}
+.cg-wrap square.move-dest {
+    background: radial-gradient(rgba(20, 85, 30, 0.5) 22%, transparent 0);
+}
+.cg-wrap square.selected {
+    background: radial-gradient(rgba(20, 85, 30, 0.5) 22%, transparent 0);
+}
+.cg-wrap square.dark {
+    background-color: rgba(0, 0, 0, 0.55);
+}
+.cg-wrap square.light {
+    background-color: rgba(0, 0, 0, 0.2);
+}
