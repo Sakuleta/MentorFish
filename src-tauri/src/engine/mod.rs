@@ -8,9 +8,10 @@ pub mod stockfish;
 
 use crate::{UCIMove, FEN};
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 /// Output from a Stockfish analysis.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct EngineOutput {
     pub fen: FEN,
     pub eval_cp: i32,
@@ -44,7 +45,7 @@ impl Default for EngineOutput {
 }
 
 /// A single line from MultiPV analysis.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct CandidateLine {
     pub multipv: u32,
     pub pv: Vec<UCIMove>,
@@ -54,7 +55,7 @@ pub struct CandidateLine {
 }
 
 /// Configuration for the Stockfish engine.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct EngineConfig {
     /// Path to Stockfish binary
     pub binary_path: String,

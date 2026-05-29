@@ -30,22 +30,12 @@ impl PostgresStore {
     }
 
     /// Run SQL migrations from the migrations directory.
-    /// Splits the schema file into individual statements and executes each one.
+    /// Uses a robust parser that handles quoted strings, comments, and DO blocks.
     async fn run_migrations(&self) -> anyhow::Result<()> {
         let schema = include_str!("../../migrations/001_schema.sql");
-        for statement in schema.split(';') {
-            // Strip comment lines and whitespace; skip empty statements
-            let stmt: String = statement
-                .lines()
-                .filter(|line| {
-                    let trimmed = line.trim();
-                    !trimmed.is_empty() && !trimmed.starts_with("--")
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-                .trim()
-                .to_string();
-            if !stmt.is_empty() {
+        let statements = split_sql_statements(schema);
+        for stmt in statements {
+            if !stmt.trim().is_empty() {
                 sqlx::query(&stmt).execute(&self.pool).await?;
             }
         }
@@ -252,13 +242,12 @@ impl ProfileStore for PostgresStore {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|r| {
+        if let Some(r) = row {
             let style: serde_json::Value =
                 serde_json::from_value(r.get("style_profile")).unwrap_or_default();
             let sample_counts: serde_json::Value =
                 serde_json::from_value(r.get("sample_counts")).unwrap_or_default();
 
-            // Calculate confidence from sample counts
             let min_samples = sample_counts
                 .as_object()
                 .map(|o| o.values().filter_map(|v| v.as_u64()).min().unwrap_or(0))
@@ -266,7 +255,28 @@ impl ProfileStore for PostgresStore {
 
             let confidence = (min_samples as f64 / 20.0).min(1.0);
 
-            UserProfile {
+            // Load weakness patterns from the database
+            let pattern_rows = sqlx::query(
+                r#"SELECT id, pattern_name, description, occurrence_count, last_seen
+                   FROM weakness_patterns WHERE user_id = $1 ORDER BY occurrence_count DESC"#,
+            )
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default();
+
+            let weakness_patterns: Vec<crate::agents::WeaknessPattern> = pattern_rows
+                .iter()
+                .map(|pr| crate::agents::WeaknessPattern {
+                    id: pr.get("id"),
+                    pattern_name: pr.get("pattern_name"),
+                    description: pr.get("description"),
+                    occurrence_count: pr.get::<i32, _>("occurrence_count") as u32,
+                    last_seen: pr.get("last_seen"),
+                })
+                .collect();
+
+            Ok(Some(UserProfile {
                 user_id,
                 tactical_accuracy: r.get("tactical_accuracy"),
                 positional_accuracy: r.get("positional_accuracy"),
@@ -275,10 +285,12 @@ impl ProfileStore for PostgresStore {
                 time_management: r.get("time_management"),
                 tilt_resistance: r.get("tilt_resistance"),
                 style_profile: style,
-                weakness_patterns: Vec::new(), // loaded separately
+                weakness_patterns,
                 confidence,
-            }
-        }))
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn save_profile(&self, profile: &UserProfile) -> anyhow::Result<()> {
@@ -307,6 +319,27 @@ impl ProfileStore for PostgresStore {
         .bind(&profile.style_profile)
         .execute(&self.pool)
         .await?;
+
+        // Sync weakness patterns: delete existing and insert current
+        sqlx::query("DELETE FROM weakness_patterns WHERE user_id = $1")
+            .bind(profile.user_id)
+            .execute(&self.pool)
+            .await?;
+
+        for pattern in &profile.weakness_patterns {
+            sqlx::query(
+                r#"INSERT INTO weakness_patterns (id, user_id, pattern_name, description, occurrence_count, last_seen)
+                   VALUES ($1, $2, $3, $4, $5, now())"#,
+            )
+            .bind(pattern.id)
+            .bind(profile.user_id)
+            .bind(&pattern.pattern_name)
+            .bind(&pattern.description)
+            .bind(pattern.occurrence_count as i32)
+            .execute(&self.pool)
+            .await?;
+        }
+
         Ok(())
     }
 }
@@ -345,4 +378,108 @@ fn str_to_classification(s: &str) -> crate::MoveClassification {
         "mistake" => crate::MoveClassification::Mistake,
         _ => crate::MoveClassification::Blunder,
     }
+}
+
+/// Split SQL text into individual statements, respecting quoted strings and comments.
+/// Handles: single-line comments (--), block comments (/* */), single-quoted strings,
+/// dollar-quoted strings, and semicolons inside string literals.
+fn split_sql_statements(sql: &str) -> Vec<String> {
+    let mut statements = Vec::new();
+    let mut current = String::new();
+    let mut chars = sql.chars().peekable();
+    let mut in_single_quote = false;
+    let mut in_dollar_quote = false;
+    let mut dollar_tag = String::new();
+
+    while let Some(c) = chars.next() {
+        if in_single_quote {
+            current.push(c);
+            if c == '\'' {
+                // Check for escaped quote ('')
+                if chars.peek() == Some(&'\'') {
+                    current.push(*chars.peek().unwrap());
+                    chars.next();
+                } else {
+                    in_single_quote = false;
+                }
+            }
+        } else if in_dollar_quote {
+            current.push(c);
+            // Check if we're at the end of the dollar quote
+            if c == '$' {
+                let collected: String = current[current.len() - dollar_tag.len()..].to_string();
+                if collected == dollar_tag {
+                    in_dollar_quote = false;
+                    dollar_tag.clear();
+                }
+            }
+        } else if c == '\'' {
+            in_single_quote = true;
+            current.push(c);
+        } else if c == '$' {
+            // Start of potential dollar quote
+            let mut tag = String::from('$');
+            while let Some(&next) = chars.peek() {
+                if next.is_alphanumeric() || next == '_' {
+                    tag.push(next);
+                    chars.next();
+                } else if next == '$' {
+                    tag.push('$');
+                    chars.next();
+                    break;
+                } else {
+                    break;
+                }
+            }
+            if tag.len() > 2 && tag.ends_with('$') {
+                // Valid dollar quote like $$ or $tag$
+                in_dollar_quote = true;
+                dollar_tag = tag.clone();
+                current.push_str(&tag);
+            } else {
+                current.push_str(&tag);
+            }
+        } else if c == '-' && chars.peek() == Some(&'-') {
+            // Single-line comment — skip until newline
+            chars.next(); // consume second -
+            while let Some(&next) = chars.peek() {
+                if next == '\n' {
+                    break;
+                }
+                chars.next();
+            }
+        } else if c == '/' && chars.peek() == Some(&'*') {
+            // Block comment — skip until */
+            chars.next(); // consume *
+            let mut depth = 1u32;
+            while let Some(next) = chars.next() {
+                if next == '/' && chars.peek() == Some(&'*') {
+                    depth += 1;
+                    chars.next();
+                } else if next == '*' && chars.peek() == Some(&'/') {
+                    depth -= 1;
+                    chars.next();
+                    if depth == 0 {
+                        break;
+                    }
+                }
+            }
+        } else if c == ';' {
+            let trimmed = current.trim().to_string();
+            if !trimmed.is_empty() {
+                statements.push(trimmed);
+            }
+            current.clear();
+        } else {
+            current.push(c);
+        }
+    }
+
+    // Push remaining text as final statement
+    let trimmed = current.trim().to_string();
+    if !trimmed.is_empty() {
+        statements.push(trimmed);
+    }
+
+    statements
 }

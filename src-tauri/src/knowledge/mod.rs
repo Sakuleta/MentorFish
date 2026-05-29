@@ -10,7 +10,7 @@ use crate::FEN;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Instant;
 
 // ─── Knowledge Directory (resolved at startup) ───
@@ -71,29 +71,6 @@ pub struct RetrievalResult {
     pub chunks: Vec<KnowledgeChunk>,
     pub query_time_ms: u64,
     pub total_chunks_searched: u64,
-}
-
-/// Classification of similarity confidence.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SimilarityClass {
-    /// Cosine similarity >= 0.72
-    High,
-    /// 0.60 <= similarity < 0.72
-    Medium,
-    /// Similarity < 0.60 — discarded
-    Low,
-}
-
-impl SimilarityClass {
-    pub fn from_score(score: f64) -> Self {
-        if score >= 0.72 {
-            SimilarityClass::High
-        } else if score >= 0.60 {
-            SimilarityClass::Medium
-        } else {
-            SimilarityClass::Low
-        }
-    }
 }
 
 // ─── In-Memory Knowledge Store ───
@@ -523,8 +500,8 @@ impl KnowledgeStore {
 // ─── Global Store (lazy-loaded) ───
 
 #[allow(clippy::incompatible_msrv)]
-static STORE: std::sync::LazyLock<Mutex<KnowledgeStore>> =
-    std::sync::LazyLock::new(|| Mutex::new(KnowledgeStore::new()));
+static STORE: std::sync::LazyLock<tokio::sync::Mutex<KnowledgeStore>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(KnowledgeStore::new()));
 
 fn ensure_loaded(store: &mut KnowledgeStore) {
     store.load();
@@ -541,7 +518,7 @@ pub async fn retrieve(
     max_chunks: usize,
     embedding: Option<&[f32]>,
 ) -> anyhow::Result<RetrievalResult> {
-    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut store = STORE.lock().await;
     ensure_loaded(&mut store);
 
     Ok(store.search(Some(position_fen), query, max_chunks, embedding))
@@ -552,7 +529,7 @@ pub async fn retrieve_by_type(
     chunk_type: &str,
     max_chunks: usize,
 ) -> anyhow::Result<RetrievalResult> {
-    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut store = STORE.lock().await;
     ensure_loaded(&mut store);
 
     Ok(store.search_by_type(chunk_type, max_chunks))
@@ -565,7 +542,7 @@ pub async fn retrieve_by_source(
     source: &str,
     max_chunks: usize,
 ) -> anyhow::Result<RetrievalResult> {
-    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut store = STORE.lock().await;
     ensure_loaded(&mut store);
 
     Ok(store.search_by_source(source, max_chunks))
@@ -575,7 +552,7 @@ pub async fn retrieve_by_source(
 /// Looks up the openings_tree_merged.json data for the exact or
 /// partial FEN match and returns the corresponding OpeningNode.
 pub async fn retrieve_opening(fen: &FEN) -> anyhow::Result<Option<OpeningNode>> {
-    let mut store = STORE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut store = STORE.lock().await;
     ensure_loaded(&mut store);
 
     Ok(store.search_opening(fen))
@@ -743,131 +720,19 @@ fn parse_chunk_type_str(s: &str) -> ChunkType {
 
 /// Get a static HashMap of known opening positions mapped to (ECO, name).
 /// Uses `OnceLock` for lazy initialization.
-fn get_opening_names() -> &'static HashMap<&'static str, (&'static str, &'static str)> {
-    static NAMES: OnceLock<HashMap<&'static str, (&'static str, &'static str)>> = OnceLock::new();
+fn get_opening_names() -> &'static HashMap<String, (String, String)> {
+    static NAMES: OnceLock<HashMap<String, (String, String)>> = OnceLock::new();
     NAMES.get_or_init(|| {
-        let mut m = HashMap::new();
-        m.insert(
-            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR",
-            ("", "Starting Position"),
-        );
-        m.insert(
-            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR",
-            ("C00", "King's Pawn"),
-        );
-        m.insert(
-            "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR",
-            ("A40", "Queen's Pawn"),
-        );
-        m.insert(
-            "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR",
-            ("B20", "Sicilian Defense"),
-        );
-        m.insert(
-            "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR",
-            ("C40", "King's Pawn Game"),
-        );
-        m.insert(
-            "rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR",
-            ("A10", "English Opening"),
-        );
-        m.insert(
-            "rnbqkbnr/pppppppp/8/8/8/5N2/PPPPPPPP/RNBQKB1R",
-            ("A04", "Réti Opening"),
-        );
-        m.insert(
-            "rnbqkbnr/pp1ppppp/8/2p5/2P5/8/PP1PPPPP/RNBQKBNR",
-            ("A10", "English, Sicilian"),
-        );
-        m.insert(
-            "rnbqkbnr/pp1ppppp/8/2p5/3P4/8/PPP1PPPP/RNBQKBNR",
-            ("A40", "Queen's Pawn, Sicilian"),
-        );
-        m.insert(
-            "rnbqkbnr/pppp1ppp/8/4p3/2P5/8/PP1PPPPP/RNBQKBNR",
-            ("A20", "English Opening"),
-        );
-        m.insert(
-            "rnbqkbnr/pppp1ppp/8/4p3/3P4/8/PPP1PPPP/RNBQKBNR",
-            ("C00", "French Defense"),
-        );
-        m.insert(
-            "rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBQKBNR",
-            ("D00", "Queen's Pawn, d5"),
-        );
-        m.insert(
-            "rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP2PPPP/RNBQKBNR",
-            ("D06", "Queen's Gambit"),
-        );
-        m.insert(
-            "rnbqkbnr/ppp2ppp/4p3/3p4/2PP4/8/PP2PPPP/RNBQKBNR",
-            ("D30", "Queen's Gambit Declined"),
-        );
-        m.insert(
-            "rnbqkbnr/ppp2ppp/4p3/3p4/3P4/8/PPP1PPPP/RNBQKBNR",
-            ("D00", "Queen's Pawn"),
-        );
-        m.insert(
-            "rnbqkbnr/pp2pppp/8/2pp4/3P4/8/PPP1PPPP/RNBQKBNR",
-            ("D00", "Queen's Pawn"),
-        );
-        m.insert(
-            "rnbqkb1r/pppppppp/5n2/8/3P4/8/PPP1PPPP/RNBQKBNR",
-            ("A40", "Indian Defense"),
-        );
-        m.insert(
-            "rnbqkb1r/pppppppp/5n2/8/2P5/8/PP1PPPPP/RNBQKBNR",
-            ("A10", "English, Indian"),
-        );
-        m.insert(
-            "rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR",
-            ("B00", "King's Pawn, Nf6"),
-        );
-        m.insert(
-            "rnbqkb1r/pp1ppppp/5n2/2p5/4P3/8/PPPP1PPP/RNBQKBNR",
-            ("B27", "Sicilian, Nf6"),
-        );
-        m.insert(
-            "rnbqkb1r/pp1ppppp/3p4/2p5/2PP4/8/PP2PPPP/RNBQKBNR",
-            ("D30", "QGD, Sicilian"),
-        );
-        m.insert(
-            "rnbqkb1r/ppp1pppp/5n2/3p4/3P4/8/PPP1PPPP/RNBQKBNR",
-            ("D00", "Queen's Pawn, Nf6"),
-        );
-        m.insert(
-            "rnbqkb1r/ppp1pppp/3p4/8/3P4/8/PPP1PPPP/RNBQKBNR",
-            ("D00", "Queen's Pawn, d6"),
-        );
-        m.insert(
-            "rnbqkbnr/ppppp1pp/8/5p2/3P4/8/PPP1PPPP/RNBQKBNR",
-            ("A40", "Queen's Pawn, f5"),
-        );
-        m.insert(
-            "rnbqkbnr/ppppp1pp/8/5p2/4P3/8/PPPP1PPP/RNBQKBNR",
-            ("C00", "King's Pawn, f5"),
-        );
-        m.insert(
-            "rnbqkbnr/pp1ppppp/2p5/8/4P3/8/PPPP1PPP/RNBQKBNR",
-            ("B10", "Caro-Kann Defense"),
-        );
-        m.insert(
-            "rnbqkbnr/pp1ppppp/2p5/8/3P4/8/PPP1PPPP/RNBQKBNR",
-            ("A40", "Queen's Pawn, c6"),
-        );
-        m.insert(
-            "rnbqkbnr/ppp2ppp/4p3/3p4/4P3/8/PPPP1PPP/RNBQKBNR",
-            ("C00", "French Defense"),
-        );
-        m.insert(
-            "rnbqkbnr/pp2pppp/8/2pp4/4P3/8/PPPP1PPP/RNBQKBNR",
-            ("B20", "Sicilian Defense"),
-        );
-        m.insert(
-            "rnbqkb1r/pp1ppppp/3p4/2p5/4P3/3P4/PPP2PPP/RNBQKBNR",
-            ("B50", "Sicilian, Modern"),
-        );
-        m
+        let json_str = include_str!("../../migrations/opening_names.json");
+        let data: HashMap<String, Vec<String>> =
+            serde_json::from_str(json_str).unwrap_or_default();
+        data.into_iter()
+            .map(|(fen, values)| {
+                let eco = values.first().cloned().unwrap_or_default();
+                let name = values.get(1).cloned().unwrap_or_default();
+                (fen, (eco, name))
+            })
+            .collect()
     })
 }
 
@@ -877,7 +742,7 @@ fn detect_opening(fen: &str) -> Option<(String, String)> {
     let board_part = fen.split_whitespace().next()?;
     get_opening_names()
         .get(board_part)
-        .map(|&(eco, name)| (eco.to_string(), name.to_string()))
+        .map(|(eco, name)| (eco.clone(), name.clone()))
 }
 
 /// Parse a JSON value into an OpeningNode.
@@ -940,27 +805,6 @@ mod tests {
         // All stop words should be filtered
         let result = tokenize("the and for that this with from");
         assert!(result.is_empty(), "All stop words, got: {:?}", result);
-    }
-
-    #[test]
-    fn test_similarity_class_high() {
-        assert_eq!(SimilarityClass::from_score(0.72), SimilarityClass::High);
-        assert_eq!(SimilarityClass::from_score(0.85), SimilarityClass::High);
-        assert_eq!(SimilarityClass::from_score(1.0), SimilarityClass::High);
-    }
-
-    #[test]
-    fn test_similarity_class_medium() {
-        assert_eq!(SimilarityClass::from_score(0.60), SimilarityClass::Medium);
-        assert_eq!(SimilarityClass::from_score(0.65), SimilarityClass::Medium);
-        assert_eq!(SimilarityClass::from_score(0.719), SimilarityClass::Medium);
-    }
-
-    #[test]
-    fn test_similarity_class_low() {
-        assert_eq!(SimilarityClass::from_score(0.0), SimilarityClass::Low);
-        assert_eq!(SimilarityClass::from_score(0.30), SimilarityClass::Low);
-        assert_eq!(SimilarityClass::from_score(0.599), SimilarityClass::Low);
     }
 
     #[test]

@@ -14,6 +14,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.6.2", features = [] }
+tauri-specta = { version = "2.0.0-rc.25", features = ["typescript"] }
+specta = { version = "2.0.0-rc.25", features = ["derive", "uuid", "serde_json"] }
 
 [dependencies]
 # ─── Tauri Core ───
@@ -40,6 +42,9 @@ num_cpus = "1"
 # ─── Database ───
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono"] }
 redis = { version = "0.27", features = ["tokio-comp"] }
+
+# ─── Specta (type generation for IPC) ───
+specta = { version = "2.0.0-rc.25", features = ["derive", "uuid", "serde_json"] }
 
 # ─── Utilities ───
 uuid = { version = "1", features = ["v4", "serde"] }

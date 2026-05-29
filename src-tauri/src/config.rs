@@ -60,6 +60,7 @@ impl AppConfig {
         if path.exists() {
             let json = std::fs::read_to_string(&path)?;
             let config: AppConfig = serde_json::from_str(&json)?;
+            config.validate()?;
             log::info!("Loaded config from {}", path.display());
             Ok(config)
         } else {
@@ -69,6 +70,40 @@ impl AppConfig {
             }
             Ok(config)
         }
+    }
+
+    /// Validate config values to prevent resource exhaustion or misconfiguration.
+    fn validate(&self) -> anyhow::Result<()> {
+        if self.stockfish_threads == 0 || self.stockfish_threads > 128 {
+            anyhow::bail!(
+                "stockfish_threads must be 1..128, got {}",
+                self.stockfish_threads
+            );
+        }
+        if self.stockfish_hash_mb < 16 || self.stockfish_hash_mb > 65536 {
+            anyhow::bail!(
+                "stockfish_hash_mb must be 16..65536, got {}",
+                self.stockfish_hash_mb
+            );
+        }
+        if self.analysis_depth < 1 || self.analysis_depth > 30 {
+            anyhow::bail!("analysis_depth must be 1..30, got {}", self.analysis_depth);
+        }
+        if self.multipv < 1 || self.multipv > 10 {
+            anyhow::bail!("multipv must be 1..10, got {}", self.multipv);
+        }
+        // Validate Ollama URL is localhost only (prevent SSRF)
+        let url_lower = self.ollama_url.to_lowercase();
+        if !url_lower.starts_with("http://localhost")
+            && !url_lower.starts_with("http://127.0.0.1")
+            && !url_lower.starts_with("http://[::1]")
+        {
+            anyhow::bail!(
+                "ollama_url must point to localhost. External URLs are not allowed. Got: {}",
+                self.ollama_url
+            );
+        }
+        Ok(())
     }
 
     /// Save config to the app's data directory.

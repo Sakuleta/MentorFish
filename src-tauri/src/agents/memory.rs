@@ -5,16 +5,17 @@
 
 use crate::ConfidenceScore;
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 /// Delta to apply to the user profile after a game.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct ProfileDelta {
     pub dimension_updates: Vec<DimensionUpdate>,
     pub new_weakness_flags: Vec<WeaknessFlag>,
     pub opening_repertoire_events: Vec<RepertoireEvent>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct DimensionUpdate {
     pub dimension: ProfileDimension,
     pub game_value: f64,
@@ -23,7 +24,7 @@ pub struct DimensionUpdate {
     pub confidence: ConfidenceScore,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 pub enum ProfileDimension {
     TacticalAccuracy,
     PositionalAccuracy,
@@ -33,21 +34,21 @@ pub enum ProfileDimension {
     TiltResistance,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct WeaknessFlag {
     pub pattern_name: String,
     pub description: String,
     pub example_fen: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct RepertoireEvent {
     pub fen: String,
     pub color: String,
     pub event_type: RepertoireEventType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub enum RepertoireEventType {
     Played,
     Deviated,

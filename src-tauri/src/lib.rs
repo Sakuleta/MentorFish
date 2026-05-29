@@ -10,6 +10,7 @@ pub mod memory;
 pub mod orchestrator;
 
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::path::PathBuf;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
@@ -19,7 +20,7 @@ use tauri_plugin_shell::ShellExt;
 pub type FEN = String;
 pub type UCIMove = String;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Move {
     pub uci: UCIMove,
     pub san: Option<String>,
@@ -34,13 +35,13 @@ pub struct Move {
     pub classification: Option<MoveClassification>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 pub enum Color {
     White,
     Black,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 pub enum MoveClassification {
     Best,
     Good,
@@ -252,13 +253,6 @@ pub fn run() {
             // Resolve Stockfish path: try sidecar first, fall back to local binary (or config)
             let binary_path = resolve_stockfish_path(app.handle());
 
-            log::info!(
-                "LLM inference client initialized (primary: {}, fast: {}, embedding: {})",
-                inference.primary_model,
-                inference.fast_model,
-                inference.embedding_model,
-            );
-
             let engine_config = engine::EngineConfig {
                 binary_path: binary_path.clone(),
                 threads: stockfish_threads,
@@ -270,11 +264,11 @@ pub fn run() {
             let engine = engine::stockfish::StockfishManager::new(engine_config);
             log::info!("Stockfish engine initialized (binary: {})", binary_path);
 
-            let app_state = std::sync::Arc::new(ipc::AppState {
-                engine: Box::new(engine),
-                inference: Box::new(inference),
-                database: database.clone(),
-            });
+            let app_state = std::sync::Arc::new(ipc::AppState::new(
+                Box::new(engine),
+                Box::new(inference),
+                database.clone(),
+            ));
 
             app.manage(app_state);
 

@@ -5,6 +5,7 @@
 
 use crate::{ConfidenceScore, UCIMove, FEN};
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 pub mod curriculum;
 pub mod executor;
@@ -16,7 +17,7 @@ pub mod theory;
 
 // ─── Shared Agent Types ───
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct RetrievalBundle {
     pub chunks: Vec<KnowledgeChunk>,
     pub opening_node: Option<OpeningNode>,
@@ -24,7 +25,7 @@ pub struct RetrievalBundle {
 }
 
 /// A retrieved knowledge chunk from LanceDB.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct KnowledgeChunk {
     pub id: uuid::Uuid,
     pub chunk_type: ChunkType,
@@ -35,7 +36,7 @@ pub struct KnowledgeChunk {
     pub similarity: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 pub enum ChunkType {
     Concept,
     Opening,
@@ -45,7 +46,7 @@ pub enum ChunkType {
 }
 
 /// Opening database node.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct OpeningNode {
     pub fen: FEN,
     pub eco: Option<String>,
@@ -55,7 +56,7 @@ pub struct OpeningNode {
     pub children: Vec<OpeningMove>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct OpeningMove {
     pub uci: UCIMove,
     pub san: String,
@@ -63,7 +64,7 @@ pub struct OpeningMove {
 }
 
 /// Reference to a model game.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct GameReference {
     pub white: String,
     pub black: String,
@@ -77,7 +78,7 @@ pub struct GameReference {
 
 /// A single entry in a conversational chat history.
 /// Mirrors the frontend `ChatHistoryEntry` type.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct ChatHistoryEntry {
     pub role: String, // "user" | "assistant" | "system"
     pub content: String,
@@ -85,7 +86,7 @@ pub struct ChatHistoryEntry {
 
 // ─── User Profile (cross-agent reference) ───
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct UserProfile {
     pub user_id: uuid::Uuid,
     pub tactical_accuracy: f64,
@@ -99,7 +100,7 @@ pub struct UserProfile {
     pub confidence: ConfidenceScore,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct WeaknessPattern {
     pub id: uuid::Uuid,
     pub pattern_name: String,

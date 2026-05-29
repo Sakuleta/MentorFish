@@ -5,9 +5,10 @@
 
 use crate::ConfidenceScore;
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 /// The final assembled explanation, surfaced in the UI.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct FinalExplanation {
     pub text: String,
     pub layer_breakdown: Vec<LayerContent>,
@@ -16,7 +17,7 @@ pub struct FinalExplanation {
 }
 
 /// One layer in the hierarchical explanation (Section 2.5).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct LayerContent {
     pub layer: u32,
     pub layer_name: String,
@@ -24,7 +25,7 @@ pub struct LayerContent {
     pub confidence: ConfidenceScore,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 pub enum ExplanationDepth {
     Brief,
     Standard,
@@ -32,7 +33,7 @@ pub enum ExplanationDepth {
 }
 
 /// Coaching persona (Section 14).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Type)]
 pub enum Persona {
     SovietCoach,
     #[default]

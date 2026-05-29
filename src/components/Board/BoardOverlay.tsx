@@ -45,6 +45,7 @@ interface Props {
   lastMove?: [string, string] | null;
   dests?: Map<string, string[]>;
   turnColor?: "white" | "black";
+  check?: boolean;
 
   // ── Arrow overlay props ──
   /** Engine best move in UCI format */
@@ -84,6 +85,7 @@ export function BoardOverlay({
   lastMove,
   dests,
   turnColor,
+  check,
   bestMove,
   candidates,
   userMove,
@@ -126,6 +128,7 @@ export function BoardOverlay({
           lastMove={lastMove}
           dests={dests}
           turnColor={turnColor}
+          check={check}
           onApiReady={handleApiReady}
           className={boardClassName}
         />

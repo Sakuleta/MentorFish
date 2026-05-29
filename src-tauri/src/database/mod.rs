@@ -26,7 +26,13 @@ impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
             postgres_url: std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-                "postgres://mentorfish:mentorfish@localhost:5432/mentorfish".to_string()
+                // Generate a random password for the default local database
+                // In production, DATABASE_URL should always be set via environment
+                let password = uuid::Uuid::new_v4().to_string();
+                format!(
+                    "postgres://mentorfish:{}@localhost:5432/mentorfish",
+                    &password[..8]
+                )
             }),
             redis_url: std::env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://localhost:6379".to_string()),

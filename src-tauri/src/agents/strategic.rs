@@ -6,8 +6,9 @@
 
 use crate::ConfidenceScore;
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct StrategicSummary {
     pub imbalances: Vec<Imbalance>,
     pub plans: Vec<Plan>,
@@ -17,27 +18,27 @@ pub struct StrategicSummary {
     pub confidence: ConfidenceScore,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Imbalance {
     pub category: String, // e.g., "bishop_vs_knight", "space_vs_activity"
     pub advantage_color: String,
     pub description: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Plan {
     pub description: String,
     pub candidate_moves: Vec<String>,
     pub rationale: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct PawnStructureClassification {
     pub structure_type: String, // e.g., "isolated_queens_pawn", "carlsbad"
     pub plans: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Theme {
     pub name: String,
     pub description: String,

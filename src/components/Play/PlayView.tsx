@@ -63,12 +63,14 @@ export function PlayView() {
   const [moves, setMoves] = useState<string[]>([]);
   const [gameOver, setGameOver] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [check, setCheck] = useState(false);
   const [captured, setCaptured] = useState<{ w: string[]; b: string[] }>({
     w: [],
     b: [],
   });
   const [lastMove, setLastMove] = useState<[string, string] | null>(null);
   const [isThinking, setIsThinking] = useState(false);
+  const [engineError, setEngineError] = useState(false);
 
   const turnColor = useMemo(
     () => (fen.split(" ")[1] === "b" ? "black" : "white"),
@@ -119,6 +121,8 @@ export function PlayView() {
       setFen(newFen);
       setCurrentFen(newFen);
       setMoves(g.history());
+      setCheck(g.isCheck());
+      setEngineError(false);
 
       const historyVerbose = g.history({ verbose: true });
       if (historyVerbose.length > 0) {
@@ -160,11 +164,10 @@ export function PlayView() {
     [setCurrentFen, setGameResult, addGameToHistory, boardOrientation],
   );
 
-  // ── Actions ──
+  // ── Actions (matches lila's server-authoritative move flow) ──
   const handleMove = useCallback(
     async (from: string, to: string) => {
-      if (gameOver) return;
-      if (isThinking) return;
+      if (gameOver || isThinking) return;
       if (playMode !== "human" && !isUserTurn) return;
 
       const g = chessRef.current;
@@ -175,7 +178,6 @@ export function PlayView() {
       let uci = from + to;
       if (move.promotion) uci += move.promotion;
 
-      // Immediately update UI so the user's piece animates
       syncFromChess(g);
 
       if (playMode === "human") return;
@@ -190,19 +192,18 @@ export function PlayView() {
           targetElo: playStrength,
         });
 
-        if (res.aiMove) {
-          const aiFrom = res.aiMove.slice(0, 2);
-          const aiTo = res.aiMove.slice(2, 4);
-          const aiPromo = res.aiMove[4] || undefined;
-          g.move({ from: aiFrom, to: aiTo, promotion: aiPromo });
+        // Use backend FEN as source of truth to avoid chess.js / shakmaty desync
+        const authoritativeFen = res.aiFen ?? res.fen;
+        if (authoritativeFen) {
+          g.load(authoritativeFen);
         }
 
         syncFromChess(g);
       } catch (err) {
         console.error("Engine move failed:", err);
-        // Roll back user move on error
-        g.undo();
-        syncFromChess(g);
+        // Keep the user's move on the board — don't roll back
+        // (like lila: piece stays, game continues, user can undo manually)
+        setEngineError(true);
       } finally {
         setIsThinking(false);
       }
@@ -219,6 +220,8 @@ export function PlayView() {
     setGameOver(false);
     setResult(null);
     setGameResult(null);
+    setCheck(false);
+    setEngineError(false);
     setCaptured({ w: [], b: [] });
     setLastMove(null);
     setIsThinking(false);
@@ -232,11 +235,10 @@ export function PlayView() {
           playMode === "training" ? "training" : "full",
           playStrength,
         );
-        if (res.aiMove) {
-          const aiFrom = res.aiMove.slice(0, 2);
-          const aiTo = res.aiMove.slice(2, 4);
-          const aiPromo = res.aiMove[4] || undefined;
-          g.move({ from: aiFrom, to: aiTo, promotion: aiPromo });
+        if (res.aiFen) {
+          g.load(res.aiFen);
+        } else if (res.aiMove) {
+          g.move({ from: res.aiMove.slice(0, 2), to: res.aiMove.slice(2, 4), promotion: res.aiMove[4] || undefined });
         }
         syncFromChess(g);
       } catch (err) {
@@ -273,7 +275,9 @@ export function PlayView() {
           playStrength,
         );
         if (cancelled) return;
-        if (res.aiMove) {
+        if (res.aiFen) {
+          g.load(res.aiFen);
+        } else if (res.aiMove) {
           g.move({
             from: res.aiMove.slice(0, 2),
             to: res.aiMove.slice(2, 4),
@@ -304,6 +308,7 @@ export function PlayView() {
   const handleResign = useCallback(() => {
     if (gameOver) return;
     setGameOver(true);
+    setEngineError(false);
     const res = boardOrientation === "white" ? "0-1" : "1-0";
     setResult(res);
     setGameResult(res);
@@ -320,6 +325,7 @@ export function PlayView() {
   const handleDraw = useCallback(() => {
     if (gameOver) return;
     setGameOver(true);
+    setEngineError(false);
     setResult("1/2-1/2");
     setGameResult("1/2-1/2");
     addGameToHistory({
@@ -444,7 +450,7 @@ export function PlayView() {
                 chessRef.current.undo();
                 syncFromChess(chessRef.current);
               }}
-              disabled={moves.length === 0}
+              disabled={moves.length === 0 || isThinking}
               className="flex-1"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
@@ -543,8 +549,16 @@ export function PlayView() {
             dests={dests}
             turnColor={turnColor}
             orientation={boardOrientation}
+            check={check}
             className="h-full aspect-square max-w-full"
           />
+          {engineError && (
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10">
+              <Badge variant="destructive" className="text-xs whitespace-nowrap">
+                Engine error — use undo or New Game
+              </Badge>
+            </div>
+          )}
         </div>
       </div>
 

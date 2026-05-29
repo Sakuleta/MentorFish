@@ -1,5 +1,8 @@
-import type { Dests } from "@lichess-org/chessground/types";
+import type { Dests, Key } from "@lichess-org/chessground/types";
+import type { Chessground as ChessgroundFactory } from "@lichess-org/chessground";
 import { useEffect, useRef } from "react";
+
+type ChessgroundApi = ReturnType<ChessgroundFactory>;
 
 interface Props {
   fen?: string;
@@ -10,14 +13,16 @@ interface Props {
   turnColor?: "white" | "black";
   /** Board orientation: "white" (white at bottom) or "black" (black at bottom) */
   orientation?: "white" | "black";
+  /** Whether the current position is check */
+  check?: boolean;
   /** Called when the chessground API instance is ready */
-  onApiReady?: (api: unknown) => void;
+  onApiReady?: (api: ChessgroundApi) => void;
   /** Optional CSS class override. Defaults to a viewport-relative square. */
   className?: string;
 }
 
 /**
- * Chessground wrapper — same pattern as lichess.org.
+ * Chessground wrapper — matches lichess.org pattern exactly.
  * NEVER passes a plain object for dests; chessground requires Map<Key, Key[]>.
  */
 export function Board({
@@ -27,52 +32,41 @@ export function Board({
   dests,
   turnColor,
   orientation = "white",
+  check,
   onApiReady,
   className,
 }: Props) {
   const el = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const api = useRef<any>(null);
+  const api = useRef<ChessgroundApi | null>(null);
 
   // ── Stable prop refs (so the init effect can read latest values) ──
   const fenRef = useRef(fen);
-  useEffect(() => {
-    fenRef.current = fen;
-  }, [fen]);
+  useEffect(() => { fenRef.current = fen; }, [fen]);
 
   const lastMoveRef = useRef(lastMove);
-  useEffect(() => {
-    lastMoveRef.current = lastMove;
-  }, [lastMove]);
+  useEffect(() => { lastMoveRef.current = lastMove; }, [lastMove]);
 
   const destsRef = useRef(dests);
-  useEffect(() => {
-    destsRef.current = dests;
-  }, [dests]);
+  useEffect(() => { destsRef.current = dests; }, [dests]);
 
   const turnColorRef = useRef(turnColor);
-  useEffect(() => {
-    turnColorRef.current = turnColor;
-  }, [turnColor]);
+  useEffect(() => { turnColorRef.current = turnColor; }, [turnColor]);
 
   const orientationRef = useRef(orientation);
-  useEffect(() => {
-    orientationRef.current = orientation;
-  }, [orientation]);
+  useEffect(() => { orientationRef.current = orientation; }, [orientation]);
+
+  const checkRef = useRef(check);
+  useEffect(() => { checkRef.current = check; }, [check]);
 
   const onMoveRef = useRef(onMove);
-  useEffect(() => {
-    onMoveRef.current = onMove;
-  }, [onMove]);
+  useEffect(() => { onMoveRef.current = onMove; }, [onMove]);
 
   const onApiReadyRef = useRef(onApiReady);
-  useEffect(() => {
-    onApiReadyRef.current = onApiReady;
-  }, [onApiReady]);
+  useEffect(() => { onApiReadyRef.current = onApiReady; }, [onApiReady]);
 
   const apiReadyFired = useRef(false);
 
-  // ── Initialize Chessground ONCE ──
+  // ── Initialize Chessground ONCE (matching lila's ground.ts pattern) ──
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -86,11 +80,11 @@ export function Board({
       const currentTurn = turnColorRef.current || "white";
       const currentOrientation = orientationRef.current || "white";
 
-      console.log("[Board] Initializing chessground with fen:", currentFen);
       api.current = Chessground(el.current, {
         fen: currentFen,
         orientation: currentOrientation,
         turnColor: currentTurn,
+        check: !!checkRef.current,
         coordinates: true,
         animation: { enabled: true, duration: 200 },
         highlight: { lastMove: true, check: true },
@@ -100,8 +94,7 @@ export function Board({
           dests: undefined,
           showDests: true,
           events: {
-            after: (orig: string, dest: string) => {
-              console.log("[Board] Move:", orig, "->", dest);
+            after: (orig: Key, dest: Key) => {
               onMoveRef.current?.(orig, dest);
             },
           },
@@ -110,18 +103,15 @@ export function Board({
           enabled: true,
           showGhost: true,
         },
+        selectable: {
+          enabled: true,
+        },
+        disableContextMenu: true,
       });
-      console.log("[Board] Chessground initialized, api:", !!api.current);
 
-      // ── CRITICAL: Apply any props that arrived before/during init ──
+      // Apply any dests that arrived before init completed
       const currentDests = destsRef.current;
-      const hasDests = currentDests && currentDests.size > 0;
-      if (hasDests) {
-        console.log(
-          "[Board] Applying delayed dests:",
-          currentDests!.size,
-          "origins",
-        );
+      if (currentDests && currentDests.size > 0) {
         api.current.set({
           movable: {
             dests: currentDests as unknown as Dests,
@@ -132,7 +122,6 @@ export function Board({
         });
       }
 
-      // Notify parent that the API is ready (only once per mount)
       if (!apiReadyFired.current && api.current) {
         apiReadyFired.current = true;
         onApiReadyRef.current?.(api.current);
@@ -146,32 +135,16 @@ export function Board({
     };
   }, []);
 
-  // ── Update board state atomically after a move ──
-  // Chessground's `set()` merges config, but `turnColor` / `movable.color`
-  // must be set together with `fen` and `lastMove` in a single call so
-  // internal state (highlight, turn indicator, piece interaction) stays
-  // consistent.  The Chessground docs show this exact pattern:
-  //
-  //   board.set({ fen, lastMove, turnColor, movable: { color, dests } })
-  //
-  // Using separate set() calls leaves `turnColor` stale and can break
-  // piece dragging after the opponent moves.
+  // ── Update board state atomically (matches lila's ground.reload pattern) ──
   useEffect(() => {
     if (!api.current) return;
     const hasDests = dests && dests.size > 0;
-    console.log(
-      "[Board] Updating board:",
-      "fen changed,",
-      "dests:",
-      hasDests ? dests.size + " origins" : "none",
-      "turnColor:",
-      turnColor,
-    );
     api.current.set({
       fen,
-      lastMove: lastMove ?? undefined,
+      lastMove: lastMove ? [lastMove[0] as Key, lastMove[1] as Key] : undefined,
       orientation,
       turnColor,
+      check: !!check,
       movable: {
         dests: hasDests ? (dests as unknown as Dests) : undefined,
         color: turnColor,
@@ -179,7 +152,7 @@ export function Board({
         showDests: true,
       },
     });
-  }, [fen, lastMove, dests, turnColor, orientation]);
+  }, [fen, lastMove, dests, turnColor, orientation, check]);
 
   return (
     <div

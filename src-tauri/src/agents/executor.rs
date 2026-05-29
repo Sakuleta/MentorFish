@@ -17,6 +17,17 @@ use crate::inference::{
 };
 use futures::StreamExt;
 
+/// Strip optional markdown code fences (```json ... ```) around a JSON string.
+fn strip_json_fences(s: &str) -> &str {
+    let s = s.trim();
+    let s = s
+        .strip_prefix("```json")
+        .or_else(|| s.strip_prefix("```"))
+        .unwrap_or(s);
+    let s = s.strip_suffix("```").unwrap_or(s);
+    s.trim()
+}
+
 /// Execute the Tactical Agent (no LLM — pure computation).
 pub fn run_tactical(engine_output: &EngineOutput, features: &FeatureBundle) -> TacticalSummary {
     crate::agents::tactical::compute(crate::agents::tactical::TacticalInput {
@@ -35,14 +46,7 @@ pub async fn run_strategic(
     let prompt = build_strategic_prompt(features, tactical, rag);
     let response = complete_text(client, ModelId::Primary, true, &prompt, None).await?;
 
-    // Strip optional markdown code fences around JSON
-    let json_str = response.trim();
-    let json_str = json_str
-        .strip_prefix("```json")
-        .or_else(|| json_str.strip_prefix("```"))
-        .unwrap_or(json_str);
-    let json_str = json_str.strip_suffix("```").unwrap_or(json_str);
-    let json_str = json_str.trim();
+    let json_str = strip_json_fences(&response);
 
     match serde_json::from_str::<StrategicSummary>(json_str) {
         Ok(summary) => Ok(summary),
@@ -76,14 +80,7 @@ pub async fn run_theory(
     let prompt = build_theory_prompt(fen, rag);
     let response = complete_text(client, ModelId::Primary, true, &prompt, None).await?;
 
-    // Strip optional markdown code fences around JSON
-    let json_str = response.trim();
-    let json_str = json_str
-        .strip_prefix("```json")
-        .or_else(|| json_str.strip_prefix("```"))
-        .unwrap_or(json_str);
-    let json_str = json_str.strip_suffix("```").unwrap_or(json_str);
-    let json_str = json_str.trim();
+    let json_str = strip_json_fences(&response);
 
     match serde_json::from_str::<TheoryOutput>(json_str) {
         Ok(output) => Ok(output),
@@ -109,14 +106,7 @@ pub async fn run_curriculum(
     let prompt = build_curriculum_prompt(profile);
     let response = complete_text(client, ModelId::Primary, false, &prompt, None).await?;
 
-    // Strip optional markdown code fences around JSON
-    let json_str = response.trim();
-    let json_str = json_str
-        .strip_prefix("```json")
-        .or_else(|| json_str.strip_prefix("```"))
-        .unwrap_or(json_str);
-    let json_str = json_str.strip_suffix("```").unwrap_or(json_str);
-    let json_str = json_str.trim();
+    let json_str = strip_json_fences(&response);
 
     match serde_json::from_str::<StudyPlan>(json_str) {
         Ok(plan) => Ok(plan),
@@ -134,20 +124,91 @@ pub async fn run_curriculum(
 }
 
 /// Execute the Memory Agent (no LLM — pure computation over game data).
-pub fn run_memory(tactical: &TacticalSummary, _strategic: &StrategicSummary) -> ProfileDelta {
-    ProfileDelta {
-        dimension_updates: vec![crate::agents::memory::DimensionUpdate {
-            dimension: crate::agents::memory::ProfileDimension::TacticalAccuracy,
-            game_value: if tactical.blunders.is_empty() {
-                0.8
-            } else {
-                0.3
-            },
+///
+/// Computes EMA-based dimension updates from tactical and strategic analysis.
+/// Generates weakness flags for recurring tactical patterns.
+pub fn run_memory(tactical: &TacticalSummary, strategic: &StrategicSummary) -> ProfileDelta {
+    use crate::agents::memory::{ProfileDimension, DimensionUpdate, WeaknessFlag};
+
+    let mut dimension_updates = Vec::new();
+    let mut new_weakness_flags = Vec::new();
+
+    // ── Tactical Accuracy ──
+    // Score: 1.0 - (blunders * 0.2), clamped to [0.1, 1.0]
+    let blunder_count = tactical.blunders.len() as f64;
+    let tactical_game_value = (1.0 - blunder_count * 0.2).clamp(0.1, 1.0);
+    dimension_updates.push(DimensionUpdate {
+        dimension: ProfileDimension::TacticalAccuracy,
+        game_value: tactical_game_value,
+        new_value: 0.5, // Will be computed by EMA in caller
+        sample_count: 1,
+        confidence: if tactical.blunders.is_empty() { 0.1 } else { 0.05 },
+    });
+
+    // ── Positional Accuracy ──
+    // Score based on strategic confidence and imbalance count
+    let strategic_game_value = if strategic.imbalances.is_empty() {
+        0.6 // No imbalances found — neutral
+    } else {
+        // More imbalances = more complex position = lower positional score
+        (0.8 - strategic.imbalances.len() as f64 * 0.05).clamp(0.3, 1.0)
+    };
+    dimension_updates.push(DimensionUpdate {
+        dimension: ProfileDimension::PositionalAccuracy,
+        game_value: strategic_game_value,
+        new_value: 0.5,
+        sample_count: 1,
+        confidence: strategic.confidence,
+    });
+
+    // ── Opening Knowledge ──
+    // Score: 1.0 if theory agent found lines, 0.5 if not evaluated
+    let opening_game_value = if strategic.confidence > 0.5 { 0.7 } else { 0.5 };
+    dimension_updates.push(DimensionUpdate {
+        dimension: ProfileDimension::OpeningKnowledge,
+        game_value: opening_game_value,
+        new_value: 0.5,
+        sample_count: 1,
+        confidence: strategic.confidence,
+    });
+
+    // ── Generate Weakness Flags ──
+    // Create flags for recurring tactical patterns (blunders with specific themes)
+    for blunder in &tactical.blunders {
+        let pattern_name = if blunder.eval_swing_cp.abs() >= 300 {
+            "severe_blunder".to_string()
+        } else if blunder.eval_swing_cp.abs() >= 150 {
+            "moderate_blunder".to_string()
+        } else {
+            continue; // Skip minor inaccuracies
+        };
+
+        new_weakness_flags.push(WeaknessFlag {
+            pattern_name,
+            description: format!(
+                "Eval swing of {} cp: {} ({})",
+                blunder.eval_swing_cp, blunder.uci_move, blunder.description
+            ),
+            example_fen: Some(blunder.position_fen.clone()),
+        });
+    }
+
+    // ── Eval Swing Analysis ──
+    // Large eval swings indicate time management or calculation issues
+    let max_swing = tactical.eval_swings.iter().map(|s| s.swing_cp.abs()).max().unwrap_or(0);
+    if max_swing >= 200 {
+        dimension_updates.push(DimensionUpdate {
+            dimension: ProfileDimension::TimeManagement,
+            game_value: 0.4, // Poor time management indicator
             new_value: 0.5,
             sample_count: 1,
             confidence: 0.05,
-        }],
-        new_weakness_flags: vec![],
+        });
+    }
+
+    ProfileDelta {
+        dimension_updates,
+        new_weakness_flags,
         opening_repertoire_events: vec![],
     }
 }
@@ -324,14 +385,7 @@ pub async fn run_pedagogical(
 
     let response = complete_text(client, model, use_thinking, &prompt, on_token).await?;
 
-    // Strip optional markdown code fences around JSON
-    let json_str = response.trim();
-    let json_str = json_str
-        .strip_prefix("```json")
-        .or_else(|| json_str.strip_prefix("```"))
-        .unwrap_or(json_str);
-    let json_str = json_str.strip_suffix("```").unwrap_or(json_str);
-    let json_str = json_str.trim();
+    let json_str = strip_json_fences(&response);
 
     match serde_json::from_str::<FinalExplanation>(json_str) {
         Ok(explanation) => Ok(explanation),

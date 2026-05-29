@@ -5,8 +5,8 @@
 // recent games, and weekly study plan.
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import type { UserProfile, WeaknessPattern } from "../../lib/types";
+import { getUserProfile, getRecentGames } from "../../lib/tauriBridge";
+import type { UserProfile, WeaknessPattern, GameSummary } from "../../lib/types";
 import { cn } from "../../lib/utils";
 import {
   Card,
@@ -27,21 +27,6 @@ import {
   CalendarDays,
   AlertTriangle,
 } from "lucide-react";
-
-// ─── Types for Tauri responses ───
-
-interface UserProfileResponse {
-  profile: UserProfile;
-}
-
-interface GameSummary {
-  game_id: string;
-  opponent: string;
-  result: string;
-  played_at: string;
-  opening: string;
-  move_count: number;
-}
 
 // ─── Dimension display helpers ───
 
@@ -313,13 +298,11 @@ export function DashboardView() {
     setLoading(true);
     setError(null);
     try {
-      const { profile: p } = await invoke<UserProfileResponse>(
-        "cmd_get_user_profile",
-      );
+      const { profile: p } = await getUserProfile();
       setProfile(p);
 
       try {
-        const games = await invoke<GameSummary[]>("cmd_get_recent_games");
+        const games = await getRecentGames();
         setRecentGames(games);
       } catch {
         setRecentGames([]);

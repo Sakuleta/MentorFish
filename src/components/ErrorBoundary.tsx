@@ -43,12 +43,12 @@ export class ErrorBoundary extends Component<Props, State> {
     errorInfo: ErrorInfo,
   ): Promise<void> {
     try {
-      // Dynamic import to avoid bloating the bundle if Tauri isn't available
-      const { invoke } = await import("@tauri-apps/api/core");
+      // Use the bridge's reportError wrapper (handles Tauri readiness check)
+      const { reportError } = await import("../lib/tauriBridge");
       const stack = [error.stack, errorInfo.componentStack]
         .filter(Boolean)
         .join("\n\n");
-      await invoke("cmd_report_error", {
+      await reportError({
         message: `${error.name}: ${error.message}`,
         stack: stack || null,
         component: this.props.name ?? null,

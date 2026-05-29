@@ -12,12 +12,13 @@ use crate::engine::EngineOutput;
 use crate::features::{DynamicFeature, FeatureBundle};
 use crate::{Move, FEN};
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::sync::Arc;
 
 // ─── Live Coaching Triggers (PRD Section 3.4) ───
 
 /// A coaching event triggered during live game play.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct LiveCoachingEvent {
     pub trigger_type: String, // "blunder", "weakness_match", "theory_departure", "user_request"
     pub message: String,
@@ -121,7 +122,7 @@ pub fn check_coaching_triggers(
 
 /// A detected psychological collapse event in post-game analysis.
 /// Three or more consecutive user moves with total eval drop >= 300cp.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct CollapseEvent {
     pub start_move: String,
     pub end_move: String,
@@ -210,7 +211,7 @@ pub struct PipelineCallbacks {
 }
 
 /// Defines the type of pipeline to execute.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub enum PipelineType {
     PostGame,
     LiveCoaching,
@@ -220,7 +221,7 @@ pub enum PipelineType {
 }
 
 /// The complete context passed into every pipeline execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct OrchestratorContext {
     pub pipeline_type: PipelineType,
     pub position: FEN,
@@ -240,7 +241,7 @@ pub struct OrchestratorContext {
     pub conversation_history: Vec<crate::agents::ChatHistoryEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct SessionContext {
     pub session_id: uuid::Uuid,
     pub loaded_model: String,
@@ -249,19 +250,50 @@ pub struct SessionContext {
 
 // ─── Pipeline Definitions (Section 7.3) ───
 
+/// Agents that can participate in a pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Type)]
+pub enum Agent {
+    Tactical,
+    Strategic,
+    Theory,
+    Memory,
+    Curriculum,
+    Pedagogical,
+}
+
+impl Agent {
+    /// String name used for error messages and callbacks.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Agent::Tactical => "tactical",
+            Agent::Strategic => "strategic",
+            Agent::Theory => "theory",
+            Agent::Memory => "memory",
+            Agent::Curriculum => "curriculum",
+            Agent::Pedagogical => "pedagogical",
+        }
+    }
+}
+
 /// Returns the ordered agent chain for a given pipeline type.
-pub fn agent_chain(pipeline: PipelineType) -> Vec<&'static str> {
+pub fn agent_chain(pipeline: PipelineType) -> Vec<Agent> {
     match pipeline {
-        PipelineType::PostGame => vec!["tactical", "strategic", "theory", "memory", "pedagogical"],
-        PipelineType::LiveCoaching => vec!["tactical", "pedagogical"],
-        PipelineType::Theory => vec!["theory", "pedagogical"],
-        PipelineType::Curriculum => vec!["memory", "curriculum", "pedagogical"],
-        PipelineType::Conversational => vec!["tactical", "pedagogical"],
+        PipelineType::PostGame => vec![
+            Agent::Tactical,
+            Agent::Strategic,
+            Agent::Theory,
+            Agent::Memory,
+            Agent::Pedagogical,
+        ],
+        PipelineType::LiveCoaching => vec![Agent::Tactical, Agent::Pedagogical],
+        PipelineType::Theory => vec![Agent::Theory, Agent::Pedagogical],
+        PipelineType::Curriculum => vec![Agent::Memory, Agent::Curriculum, Agent::Pedagogical],
+        PipelineType::Conversational => vec![Agent::Tactical, Agent::Pedagogical],
     }
 }
 
 /// Error handling policy (Section 7.5).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Type)]
 pub enum PipelineError {
     AgentError { agent: String, message: String },
     LlmTimeout { agent: String },
@@ -272,19 +304,19 @@ pub enum PipelineError {
 
 /// Model routing policy (Section 6.5).
 /// Returns the model to use for a given pipeline and agent.
-pub fn route_model(pipeline: PipelineType, agent: &str) -> &'static str {
+pub fn route_model(pipeline: PipelineType, agent: Agent) -> &'static str {
     match (pipeline, agent) {
         (PipelineType::PostGame, _) => "primary", // Qwen3-14B, thinking on
         (PipelineType::LiveCoaching, _) => "fast", // Qwen3-8B, thinking off
         (PipelineType::Theory, _) => "primary",
-        (PipelineType::Curriculum, "curriculum") => "primary",
+        (PipelineType::Curriculum, Agent::Curriculum) => "primary",
         (PipelineType::Curriculum, _) => "fast",
         (PipelineType::Conversational, _) => "fast",
     }
 }
 
 /// Model swap strategy (Section 6.4).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Type)]
 pub enum SessionPhase {
     GameInProgress,
     PostGameAnalysis,
@@ -313,7 +345,13 @@ mod tests {
         let chain = agent_chain(PipelineType::PostGame);
         assert_eq!(
             chain,
-            vec!["tactical", "strategic", "theory", "memory", "pedagogical"]
+            vec![
+                Agent::Tactical,
+                Agent::Strategic,
+                Agent::Theory,
+                Agent::Memory,
+                Agent::Pedagogical,
+            ]
         );
         assert_eq!(chain.len(), 5);
     }
@@ -321,33 +359,48 @@ mod tests {
     #[test]
     fn test_agent_chain_live_coaching() {
         let chain = agent_chain(PipelineType::LiveCoaching);
-        assert_eq!(chain, vec!["tactical", "pedagogical"]);
+        assert_eq!(chain, vec![Agent::Tactical, Agent::Pedagogical]);
         assert_eq!(chain.len(), 2);
     }
 
     #[test]
     fn test_model_routing_all_pipelines() {
         // PostGame: all agents use primary
-        for agent in &["tactical", "strategic", "theory", "memory", "pedagogical"] {
-            assert_eq!(route_model(PipelineType::PostGame, agent), "primary");
+        for agent in &[
+            Agent::Tactical,
+            Agent::Strategic,
+            Agent::Theory,
+            Agent::Memory,
+            Agent::Pedagogical,
+        ] {
+            assert_eq!(route_model(PipelineType::PostGame, *agent), "primary");
         }
         // LiveCoaching: all agents use fast
-        for agent in &["tactical", "pedagogical"] {
-            assert_eq!(route_model(PipelineType::LiveCoaching, agent), "fast");
+        for agent in &[Agent::Tactical, Agent::Pedagogical] {
+            assert_eq!(route_model(PipelineType::LiveCoaching, *agent), "fast");
         }
         // Theory: all agents use primary
-        assert_eq!(route_model(PipelineType::Theory, "theory"), "primary");
-        assert_eq!(route_model(PipelineType::Theory, "pedagogical"), "primary");
-        // Curriculum: curriculum agent uses primary, others use fast
+        assert_eq!(route_model(PipelineType::Theory, Agent::Theory), "primary");
         assert_eq!(
-            route_model(PipelineType::Curriculum, "curriculum"),
+            route_model(PipelineType::Theory, Agent::Pedagogical),
             "primary"
         );
-        assert_eq!(route_model(PipelineType::Curriculum, "memory"), "fast");
-        assert_eq!(route_model(PipelineType::Curriculum, "pedagogical"), "fast");
+        // Curriculum: curriculum agent uses primary, others use fast
+        assert_eq!(
+            route_model(PipelineType::Curriculum, Agent::Curriculum),
+            "primary"
+        );
+        assert_eq!(
+            route_model(PipelineType::Curriculum, Agent::Memory),
+            "fast"
+        );
+        assert_eq!(
+            route_model(PipelineType::Curriculum, Agent::Pedagogical),
+            "fast"
+        );
         // Conversational: all agents use fast
         assert_eq!(
-            route_model(PipelineType::Conversational, "pedagogical"),
+            route_model(PipelineType::Conversational, Agent::Pedagogical),
             "fast"
         );
     }
@@ -368,18 +421,24 @@ mod tests {
 
     #[test]
     fn test_model_routing_post_game() {
-        assert_eq!(route_model(PipelineType::PostGame, "tactical"), "primary");
         assert_eq!(
-            route_model(PipelineType::PostGame, "pedagogical"),
+            route_model(PipelineType::PostGame, Agent::Tactical),
+            "primary"
+        );
+        assert_eq!(
+            route_model(PipelineType::PostGame, Agent::Pedagogical),
             "primary"
         );
     }
 
     #[test]
     fn test_model_routing_live_coaching() {
-        assert_eq!(route_model(PipelineType::LiveCoaching, "tactical"), "fast");
         assert_eq!(
-            route_model(PipelineType::LiveCoaching, "pedagogical"),
+            route_model(PipelineType::LiveCoaching, Agent::Tactical),
+            "fast"
+        );
+        assert_eq!(
+            route_model(PipelineType::LiveCoaching, Agent::Pedagogical),
             "fast"
         );
     }

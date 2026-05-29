@@ -48,7 +48,7 @@ export async function makeMove(
 ): Promise<MakeMoveResponse> {
   const tauri = await getTauri();
   if (!tauri) throw new Error("Tauri bridge not available");
-  return tauri.invoke("make_move", { request: req });
+  return tauri.invoke("cmd_make_move", { request: req });
 }
 
 export async function aiMove(
@@ -58,11 +58,86 @@ export async function aiMove(
 ): Promise<MakeMoveResponse> {
   const tauri = await getTauri();
   if (!tauri) throw new Error("Tauri bridge not available");
-  return tauri.invoke("ai_move", {
+  return tauri.invoke("cmd_ai_move", {
     fen,
     strength_mode: strengthMode,
     target_elo: targetElo,
   });
+}
+
+// ─── Typed IPC wrappers ───
+// Components should use these instead of calling invoke() directly.
+
+import type {
+  AnalyzePositionResponse,
+  UserProfileResponse,
+  GameSummary,
+  GetBookChunksResponse,
+  IngestionReportResponse,
+  KnowledgeSummaryResponse,
+} from "./types";
+
+export async function analyzePosition(args: {
+  fen: string;
+  depth?: number;
+  pipeline_type?: string;
+  game_id?: string;
+  moves?: unknown[];
+}): Promise<AnalyzePositionResponse> {
+  const tauri = await getTauri();
+  if (!tauri) throw new Error("Tauri bridge not available");
+  return tauri.invoke("cmd_analyze_position", args);
+}
+
+export async function getUserProfile(): Promise<UserProfileResponse> {
+  const tauri = await getTauri();
+  if (!tauri) throw new Error("Tauri bridge not available");
+  return tauri.invoke("cmd_get_user_profile");
+}
+
+export async function getRecentGames(): Promise<GameSummary[]> {
+  const tauri = await getTauri();
+  if (!tauri) throw new Error("Tauri bridge not available");
+  return tauri.invoke("cmd_get_recent_games");
+}
+
+export async function getBookChunks(source: string): Promise<GetBookChunksResponse> {
+  const tauri = await getTauri();
+  if (!tauri) throw new Error("Tauri bridge not available");
+  return tauri.invoke("cmd_get_book_chunks", { request: { source } });
+}
+
+export async function runIngestion(): Promise<IngestionReportResponse> {
+  const tauri = await getTauri();
+  if (!tauri) throw new Error("Tauri bridge not available");
+  return tauri.invoke("cmd_run_ingestion");
+}
+
+export async function getKnowledgeSummary(): Promise<KnowledgeSummaryResponse> {
+  const tauri = await getTauri();
+  if (!tauri) throw new Error("Tauri bridge not available");
+  return tauri.invoke("cmd_get_knowledge_summary");
+}
+
+export async function reportError(args: {
+  message: string;
+  stack: string | null;
+  component: string | null;
+  timestamp: string;
+}): Promise<void> {
+  const tauri = await getTauri();
+  if (!tauri) throw new Error("Tauri bridge not available");
+  return tauri.invoke("cmd_report_error", args);
+}
+
+export async function getChannel(): Promise<{
+  Channel: new <T>(onmessage?: (response: T) => void) => unknown;
+}> {
+  const tauri = await getTauri();
+  if (!tauri) throw new Error("Tauri bridge not available");
+  // Channel is imported dynamically from @tauri-apps/api/core
+  const { Channel } = await import("@tauri-apps/api/core");
+  return { Channel };
 }
 
 export async function getTauri(): Promise<TauriAPI | null> {

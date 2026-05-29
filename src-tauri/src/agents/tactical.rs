@@ -7,8 +7,9 @@ use crate::engine::EngineOutput;
 use crate::features::FeatureBundle;
 use crate::{ConfidenceScore, UCIMove};
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct TacticalSummary {
     pub blunders: Vec<BlunderRecord>,
     pub missed_tactics: Vec<TacticRecord>,
@@ -17,7 +18,7 @@ pub struct TacticalSummary {
     pub confidence: ConfidenceScore,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct BlunderRecord {
     pub uci_move: UCIMove,
     pub eval_swing_cp: i32,
@@ -25,7 +26,7 @@ pub struct BlunderRecord {
     pub description: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct TacticRecord {
     pub uci_opportunity: UCIMove,
     pub eval_improvement_cp: i32,
@@ -33,7 +34,7 @@ pub struct TacticRecord {
     pub position_fen: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct EvalSwing {
     pub move_number: u32,
     pub swing_cp: i32,
@@ -41,7 +42,7 @@ pub struct EvalSwing {
     pub to_eval: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct ForcingLine {
     pub uci_sequence: Vec<UCIMove>,
     pub eval_result_cp: i32,

@@ -3,9 +3,8 @@
 
 import { useState } from "react";
 import { Board } from "./Board";
-import { invoke } from "@tauri-apps/api/core";
+import { analyzePosition } from "../../lib/tauriBridge";
 import { useAppStore } from "../../stores";
-import type { AnalyzePositionResponse } from "../../lib/types";
 import { Card, CardHeader, CardTitle, CardContent } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
@@ -26,14 +25,11 @@ export function BoardChatView() {
   const handleAnalyze = async () => {
     setAnalyzing(true);
     try {
-      const result = await invoke<AnalyzePositionResponse>(
-        "cmd_analyze_position",
-        {
-          fen: currentFen,
-          depth: 18,
-          pipelineType: "PostGame",
-        },
-      );
+      const result = await analyzePosition({
+        fen: currentFen,
+        depth: 18,
+        pipeline_type: "PostGame",
+      });
       setAnalysisResult(result.explanation.text, result.engine_eval);
       setChatMessages((prev) => [
         ...prev,

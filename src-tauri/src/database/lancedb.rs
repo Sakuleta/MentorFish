@@ -1,25 +1,57 @@
 // ─── LanceDB Vector Store ───
 //
-// Stores and retrieves knowledge chunks using cosine similarity.
-// In production, uses the lancedb Rust crate. For now, uses file-based JSON.
+// File-based vector store using JSON persistence.
+// Stores knowledge chunks with embeddings and retrieves via cosine similarity.
+// For production, this could be replaced with the actual LanceDB crate.
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use crate::agents::KnowledgeChunk;
 use crate::database::VectorStore;
 
+/// A stored chunk with its embedding vector.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredChunk {
+    chunk: KnowledgeChunk,
+    embedding: Vec<f32>,
+}
+
+/// Persistent vector store backed by a JSON file.
 pub struct LanceDbStore {
-    _path: PathBuf,
+    path: PathBuf,
+    data: Mutex<Vec<StoredChunk>>,
 }
 
 impl LanceDbStore {
     pub fn new(path: PathBuf) -> Self {
-        Self { _path: path }
+        let data = Self::load_from_file(&path);
+        Self {
+            path,
+            data: Mutex::new(data),
+        }
+    }
+
+    fn load_from_file(path: &PathBuf) -> Vec<StoredChunk> {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn save_to_file(&self, data: &[StoredChunk]) -> anyhow::Result<()> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(data)?;
+        std::fs::write(&self.path, json)?;
+        Ok(())
     }
 
     /// Cosine similarity between two vectors.
-    #[allow(dead_code)]
     fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
         if a.len() != b.len() {
             return 0.0;
@@ -50,18 +82,43 @@ impl LanceDbStore {
 impl VectorStore for LanceDbStore {
     async fn search(
         &self,
-        _embedding: &[f32],
-        _limit: usize,
+        embedding: &[f32],
+        limit: usize,
     ) -> anyhow::Result<Vec<KnowledgeChunk>> {
-        Ok(Vec::new()) // stub — real impl queries LanceDB
+        let data = self.data.lock().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+
+        let mut scored: Vec<(f64, &KnowledgeChunk)> = data
+            .iter()
+            .filter(|sc| !sc.embedding.is_empty())
+            .map(|sc| {
+                let sim = Self::cosine_similarity(embedding, &sc.embedding);
+                (sim, &sc.chunk)
+            })
+            .collect();
+
+        // Sort by similarity descending
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(limit);
+
+        Ok(scored.into_iter().map(|(_, chunk)| chunk.clone()).collect())
     }
 
     async fn insert(
         &self,
-        _chunks: &[KnowledgeChunk],
-        _embeddings: &[Vec<f32>],
+        chunks: &[KnowledgeChunk],
+        embeddings: &[Vec<f32>],
     ) -> anyhow::Result<()> {
-        Ok(()) // stub — real impl writes to LanceDB
+        let mut data = self.data.lock().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+
+        for (chunk, embedding) in chunks.iter().zip(embeddings.iter()) {
+            data.push(StoredChunk {
+                chunk: chunk.clone(),
+                embedding: embedding.clone(),
+            });
+        }
+
+        self.save_to_file(&data)?;
+        Ok(())
     }
 }
 
@@ -90,5 +147,21 @@ mod tests {
         let b = vec![-1.0, 0.0];
         let sim = LanceDbStore::cosine_similarity(&a, &b);
         assert!((sim - (-1.0)).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_cosine_similarity_different_lengths() {
+        let a = vec![1.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        let sim = LanceDbStore::cosine_similarity(&a, &b);
+        assert_eq!(sim, 0.0);
+    }
+
+    #[test]
+    fn test_cosine_similarity_zero_vector() {
+        let a = vec![0.0, 0.0];
+        let b = vec![1.0, 0.0];
+        let sim = LanceDbStore::cosine_similarity(&a, &b);
+        assert_eq!(sim, 0.0);
     }
 }

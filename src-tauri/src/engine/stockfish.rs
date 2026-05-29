@@ -25,16 +25,6 @@ struct EngineProcess {
     _child: Child,
     stdin: ChildStdin,
     stdout_lines: tokio::sync::mpsc::Receiver<String>,
-    options: HashMap<String, UciOption>,
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-struct UciOption {
-    option_type: String,
-    default: Option<String>,
-    min: Option<i64>,
-    max: Option<i64>,
 }
 
 impl StockfishManager {
@@ -47,6 +37,11 @@ impl StockfishManager {
 
     async fn ensure_started(&self) -> anyhow::Result<()> {
         let mut guard = self.inner.lock().await;
+        self.ensure_started_inner(&mut guard).await
+    }
+
+    /// Spawn Stockfish if not already running. Takes a pre-acquired lock guard.
+    async fn ensure_started_inner(&self, guard: &mut Option<EngineProcess>) -> anyhow::Result<()> {
         if let Some(ref mut proc) = *guard {
             if proc.is_alive().await {
                 return Ok(());
@@ -79,7 +74,6 @@ impl StockfishManager {
             _child: child,
             stdin,
             stdout_lines: rx,
-            options: HashMap::new(),
         };
 
         // ─── UCI Initialization Sequence ───
@@ -90,9 +84,7 @@ impl StockfishManager {
                 break;
             }
             if line.starts_with("option name ") {
-                if let Some(opt) = parse_uci_option(&line) {
-                    process.options.insert(opt.0, opt.1);
-                }
+                // UCI options are parsed but not currently used
             }
         }
 
@@ -127,9 +119,11 @@ impl StockfishManager {
         if let Some(mut proc) = guard.take() {
             let _ = proc.send_command("quit").await;
             let _ = proc._child.kill().await;
+            // Wait for the process to actually exit to prevent zombies
+            let _ = proc._child.wait().await;
         }
-        drop(guard);
-        self.ensure_started().await
+        // Keep lock held while spawning new process to prevent race conditions
+        self.ensure_started_inner(&mut guard).await
     }
 
     async fn try_analyze(
@@ -145,6 +139,10 @@ impl StockfishManager {
 
         let search_depth = depth.unwrap_or(self.config.depth);
 
+        // Validate FEN: reject strings containing newlines or semicolons to prevent UCI injection
+        if fen.contains('\n') || fen.contains('\r') || fen.contains(';') {
+            anyhow::bail!("Invalid FEN: contains prohibited characters (newline/semicolon)");
+        }
         log::debug!(
             "Stockfish: sending 'position fen {}' + 'go depth {}'",
             fen,
@@ -217,53 +215,6 @@ impl EngineProcess {
             Err(_) => false,
         }
     }
-}
-
-// ─── UCI Option Parsing ───
-
-fn parse_uci_option(line: &str) -> Option<(String, UciOption)> {
-    let line = line.strip_prefix("option name ")?;
-    let mut parts = line.splitn(2, " type ");
-    let name = parts.next()?.to_string();
-    let rest = parts.next()?;
-
-    let mut tokens = rest.split_whitespace();
-    let option_type = tokens.next()?.to_string();
-
-    let mut default = None;
-    let mut min = None;
-    let mut max = None;
-
-    let tokens_vec: Vec<&str> = rest.split_whitespace().collect();
-    let mut i = 0;
-    while i < tokens_vec.len() {
-        match tokens_vec[i] {
-            "default" if i + 1 < tokens_vec.len() => {
-                default = Some(tokens_vec[i + 1].to_string());
-                i += 1;
-            }
-            "min" if i + 1 < tokens_vec.len() => {
-                min = tokens_vec[i + 1].parse().ok();
-                i += 1;
-            }
-            "max" if i + 1 < tokens_vec.len() => {
-                max = tokens_vec[i + 1].parse().ok();
-                i += 1;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    Some((
-        name,
-        UciOption {
-            option_type,
-            default,
-            min,
-            max,
-        },
-    ))
 }
 
 // ─── UCI Output Parsing ───
@@ -501,18 +452,20 @@ impl EngineManager for StockfishManager {
     }
 
     async fn health_check(&self) -> anyhow::Result<bool> {
+        // Ensure the engine is spawned before checking health.
+        // This is a deliberate side-effect: the first health check starts Stockfish
+        // so the status dot goes green without requiring a user-triggered analysis.
+        let _ = self.ensure_started().await;
+
         let mut guard = self.inner.lock().await;
         if let Some(ref mut proc) = guard.as_mut() {
             if proc.is_alive().await {
                 return Ok(true);
             }
+            // Process is dead — clean up.
             *guard = None;
         }
-        drop(guard);
-        match self.ensure_started().await {
-            Ok(()) => Ok(true),
-            Err(_) => Ok(false),
-        }
+        Ok(false)
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {
@@ -529,35 +482,6 @@ impl EngineManager for StockfishManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_uci_option_spin() {
-        let line = "option name Threads type spin default 1 min 1 max 1024";
-        let (name, opt) = parse_uci_option(line).unwrap();
-        assert_eq!(name, "Threads");
-        assert_eq!(opt.option_type, "spin");
-        assert_eq!(opt.default, Some("1".to_string()));
-        assert_eq!(opt.min, Some(1));
-        assert_eq!(opt.max, Some(1024));
-    }
-
-    #[test]
-    fn test_parse_uci_option_string() {
-        let line = "option name SyzygyPath type string default <empty>";
-        let (name, opt) = parse_uci_option(line).unwrap();
-        assert_eq!(name, "SyzygyPath");
-        assert_eq!(opt.option_type, "string");
-        assert_eq!(opt.default, Some("<empty>".to_string()));
-    }
-
-    #[test]
-    fn test_parse_uci_option_check() {
-        let line = "option name Ponder type check default false";
-        let (name, opt) = parse_uci_option(line).unwrap();
-        assert_eq!(name, "Ponder");
-        assert_eq!(opt.option_type, "check");
-        assert_eq!(opt.default, Some("false".to_string()));
-    }
 
     #[test]
     fn test_parse_info_line_basic() {

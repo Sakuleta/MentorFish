@@ -11,7 +11,7 @@ use crate::agents::strategic::StrategicSummary;
 use crate::agents::tactical::TacticalSummary;
 use crate::agents::theory::TheoryOutput;
 use crate::inference::InferenceClient;
-use crate::orchestrator::{OrchestratorContext, PipelineCallbacks, PipelineError, PipelineType};
+use crate::orchestrator::{Agent, OrchestratorContext, PipelineCallbacks, PipelineError, PipelineType};
 
 /// Result of a completed pipeline execution.
 #[derive(Debug)]
@@ -51,15 +51,15 @@ pub async fn execute(
 
     let chain = crate::orchestrator::agent_chain(ctx.pipeline_type);
 
-    for agent_name in &chain {
-        match *agent_name {
-            "tactical" => {
+    for agent in &chain {
+        match agent {
+            Agent::Tactical => {
                 tactical = Some(executor::run_tactical(&ctx.engine_output, &ctx.features));
                 if let Some(ref cb) = callbacks.on_agent_complete {
-                    cb("tactical", "Tactical analysis complete");
+                    cb(agent.as_str(), "Tactical analysis complete");
                 }
             }
-            "strategic" => {
+            Agent::Strategic => {
                 match executor::run_strategic(
                     client,
                     &ctx.features,
@@ -70,50 +70,50 @@ pub async fn execute(
                 {
                     Ok(s) => {
                         if let Some(ref cb) = callbacks.on_agent_complete {
-                            cb("strategic", "Strategic analysis complete");
+                            cb(agent.as_str(), "Strategic analysis complete");
                         }
                         strategic = Some(s);
                     }
                     Err(e) => errors.push(PipelineError::AgentError {
-                        agent: "strategic".into(),
+                        agent: agent.as_str().into(),
                         message: e.to_string(),
                     }),
                 }
             }
-            "theory" => match executor::run_theory(client, &ctx.position, &ctx.rag_results).await {
+            Agent::Theory => match executor::run_theory(client, &ctx.position, &ctx.rag_results).await {
                 Ok(t) => {
                     if let Some(ref cb) = callbacks.on_agent_complete {
-                        cb("theory", "Opening theory check complete");
+                        cb(agent.as_str(), "Opening theory check complete");
                     }
                     theory = Some(t);
                 }
                 Err(e) => errors.push(PipelineError::AgentError {
-                    agent: "theory".into(),
+                    agent: agent.as_str().into(),
                     message: e.to_string(),
                 }),
             },
-            "memory" => {
+            Agent::Memory => {
                 profile_delta = Some(executor::run_memory(
                     tactical.as_ref().unwrap_or(&TacticalSummary::default()),
                     strategic.as_ref().unwrap_or(&StrategicSummary::default()),
                 ));
                 if let Some(ref cb) = callbacks.on_agent_complete {
-                    cb("memory", "Player profile updated");
+                    cb(agent.as_str(), "Player profile updated");
                 }
             }
-            "curriculum" => match executor::run_curriculum(client, &ctx.user_profile).await {
+            Agent::Curriculum => match executor::run_curriculum(client, &ctx.user_profile).await {
                 Ok(p) => {
                     if let Some(ref cb) = callbacks.on_agent_complete {
-                        cb("curriculum", "Study plan generated");
+                        cb(agent.as_str(), "Study plan generated");
                     }
                     study_plan = Some(p);
                 }
                 Err(e) => errors.push(PipelineError::AgentError {
-                    agent: "curriculum".into(),
+                    agent: agent.as_str().into(),
                     message: e.to_string(),
                 }),
             },
-            "pedagogical" => {
+            Agent::Pedagogical => {
                 // ── Conversational pipeline: multi-turn chat with history ──
                 if ctx.pipeline_type == PipelineType::Conversational {
                     match executor::run_conversational_chat(
@@ -250,7 +250,6 @@ pub async fn execute(
                     }
                 }
             }
-            _ => {}
         }
     }
 

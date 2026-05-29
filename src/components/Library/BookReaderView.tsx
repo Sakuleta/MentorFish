@@ -15,25 +15,10 @@ import {
   Check,
   BookOpen,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { getBookChunks } from "../../lib/tauriBridge";
+import type { BookChunk } from "../../lib/types";
 import { cn } from "../../lib/utils";
 import { Button, Card, Progress, Badge, ScrollArea } from "../../components/ui";
-
-// ─── Types ───
-
-interface BookChunk {
-  id: string;
-  chunk_type: string;
-  content: string;
-  source: string;
-  position_fen?: string;
-  opening_eco?: string;
-  similarity: number;
-}
-
-interface GetBookChunksResponse {
-  chunks: BookChunk[];
-}
 
 // ─── localStorage Keys ───
 
@@ -109,9 +94,7 @@ export function BookReaderView({
     let cancelled = false;
     fetchKeyRef.current = bookTitle;
 
-    invoke<GetBookChunksResponse>("cmd_get_book_chunks", {
-      request: { source: bookTitle },
-    })
+    getBookChunks(bookTitle)
       .then((r) => {
         if (!cancelled && fetchKeyRef.current === bookTitle) {
           setChunks(r.chunks);
